@@ -36,12 +36,11 @@ class Order
   def initialize(customer, overrides = {})
     @customer = customer
     @items = []
-    @order_item_class = overrides.fetch(:item_class) { OrderItem }
     @address = overrides.fetch(:address) { Address.new(zipcode: '45678-979') }
   end
 
-  def add_product(product)
-    @items << @order_item_class.new(order: self, product: product)
+  def add_item(item)
+    @items << item
   end
 
   def total_amount
@@ -52,7 +51,11 @@ class Order
     @closed_at = closed_at
   end
 
-  # remember: you can create new methods inside those classes to help you create a better design
+  def deliver
+    @items.each do |item|
+      item.deliver
+    end
+  end
 end
 
 class OrderItem
@@ -61,6 +64,19 @@ class OrderItem
   def initialize(order:, product:)
     @order = order
     @product = product
+    post_initialize
+  end
+
+  def shipping_warnings
+    {}
+  end
+
+  def deliver
+    raise NotImplementedError
+  end
+
+  def post_initialize
+    nil
   end
 
   def total
@@ -68,12 +84,82 @@ class OrderItem
   end
 end
 
+class Physical < OrderItem
+  def deliver
+    ShippingLabel.new(product: product, address: order.address).generate
+  end
+end
+
+class Book < OrderItem
+  def shipping_warnings
+    { warning: "Books are free of federal taxes. Constitution Art. 150, VI, d." }
+  end
+
+  def deliver
+    ShippingLabel.new(product: product, address: order.address).generate
+  end
+end
+
+class Digital < OrderItem
+  NOTIFICATION_MESSAGE = "Your digital media is already available."
+  BONUS_VALUE = 10
+
+  def deliver
+    Notification.new(customer: order.customer, message: NOTIFICATION_MESSAGE).notify
+    order.customer.add_bonus(BONUS_VALUE)
+  end
+end
+
+class Membership < OrderItem
+  NOTIFICATION_MESSAGE = "Your membership is already available."
+
+  def deliver
+    activate
+    order.customer.add_membership(product)
+    Notification.new(customer: order.customer, message: NOTIFICATION_MESSAGE).notify
+  end
+
+  def post_initialize
+    @active = false
+  end
+
+  private
+
+  def activate
+    @active = true
+  end
+end
+
 class Product
-  # use type to distinguish each kind of product: physical, book, digital, membership, etc.
   attr_reader :name, :type
 
-  def initialize(name:, type:)
-    @name, @type = name, type
+  def initialize(name:)
+    @name = args[:name]
+    @type = args[:type]
+  end
+end
+
+class ShippingLabel
+  def initialize(product:, address:)
+    @product = args[:product]
+    @address = args[:address]
+  end
+
+  def generate
+    {
+      address: @address
+    }.merge(product.shipping_warnings)
+  end
+end
+
+class Notification
+  def initialize(customer:, message:)
+    @customer = args[:customer]
+    @message = args[:message]
+  end
+
+  def notify
+    p "To: #{@customer.email} - Message: #{@message}"
   end
 end
 
@@ -92,22 +178,36 @@ class CreditCard
 end
 
 class Customer
-  # you can customize this class by yourself
+  def initialize(email:)
+    @email = args[:email]
+    @memberships = []
+    @bonus = 0
+  end
+
+  def add_membership(membership)
+    @memberships << membership
+  end
+
+  def add_bonus(bonus_value)
+    @bonus += bonus_value
+  end
 end
 
-class Membership
-  # you can customize this class by yourself
-end
+foolano = Customer.new(email: 'a@a.com')
 
-# Book Example (build new payments if you need to properly test it)
-foolano = Customer.new
 book = Product.new(name: 'Awesome book', type: :book)
-book_order = Order.new(foolano)
-book_order.add_product(book)
+tv = Product.new(name: 'Awesome tv', type: :physical)
+music = Product.new(name: 'Awesome music', type: :digital)
+netflix = Product.new(name: 'Awesome netflix', type: :membership)
 
-payment_book = Payment.new(order: book_order, payment_method: CreditCard.fetch_by_hashed('43567890-987654367'))
-payment_book.pay
-p payment_book.paid? # < true
-p payment_book.order.items.first.product.type
+order = Order.new(foolano)
+order.add_product(Book.new(order, book))
+order.add_product(Physical.new(order, tv))
+order.add_product(Digital.new(order, music))
+order.add_product(Membership.new(order, netflix))
 
-# now, how to deal with shipping rules then?
+payment = Payment.new(order: order, payment_method: CreditCard.fetch_by_hashed('43567890-987654367'))
+payment.pay
+if payment.paid?
+  payment.order.deliver
+end
