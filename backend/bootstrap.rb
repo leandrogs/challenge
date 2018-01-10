@@ -111,6 +111,8 @@ class Digital < OrderItem
 end
 
 class Membership < OrderItem
+  attr_reader :active
+
   NOTIFICATION_MESSAGE = "Your membership is already available."
 
   def deliver
@@ -133,7 +135,7 @@ end
 class Product
   attr_reader :name, :type
 
-  def initialize(name:)
+  def initialize(name:, type:)
     @name = args[:name]
     @type = args[:type]
   end
@@ -178,6 +180,8 @@ class CreditCard
 end
 
 class Customer
+  attr_reader :email, :membership, :bonus
+
   def initialize(email:)
     @email = args[:email]
     @memberships = []
